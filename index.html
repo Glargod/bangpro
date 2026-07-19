@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gunshot Analyzer • FFT + Smart Classification</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #111; color: #0f0; margin:0; padding:20px; }
+  h1 { text-align:center; }
+  .controls { text-align:center; margin:15px; }
+  button { padding:12px 20px; margin:0 8px; font-size:16px; background:#0f0; color:#000; border:none; border-radius:8px; cursor:pointer; }
+  button:hover { background:#0c0; }
+  button.red { background:#f44; }
+  .info { text-align:center; font-size:1.1em; margin:10px; }
+  canvas { border:1px solid #333; background:#000; display:block; margin:12px auto; max-width:100%; }
+  #gauge { width:300px; height:160px; }
+
+  .slider-container { text-align:center; margin:15px; }
+  input[type="range"] { width: 400px; }
+
+  table { width:100%; max-width:900px; margin:20px auto; border-collapse:collapse; background:#1a1a1a; }
+  th, td { padding:10px; border:1px solid #333; text-align:center; }
+  th { background:#222; }
+  .peak-row { background:#330000; color:#ff6666; }
+  #logContainer { max-height:420px; overflow-y:auto; }
+</style>
+</head>
+<body>
+  <h1>Gunshot Analyzer • FFT + Smart Classification</h1>
+
+  <div class="controls">
+    <button id="startBtn">Start Microphone</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <button id="clearBtn" class="red">Clear Log</button>
+  </div>
+
+  <canvas id="gauge" width="300" height="160"></canvas>
+
+  <div class="info">
+    <strong>Current:</strong> <span id="currentDb">—</span> dB &nbsp;&nbsp;
+    <strong>Avg:</strong> <span id="avgDb">—</span> dB &nbsp;&nbsp;
+    <strong>Max:</strong> <span id="maxDb">—</span> dB
+  </div>
+
+  <div class="slider-container">
+    <label>Threshold: <strong><span id="thresholdValue">75</span></strong> dB</label><br>
+    <input type="range" id="thresholdSlider" min="50" max="130" value="75" step="1">
+  </div>
+
+  <canvas id="waveform" width="900" height="120"></canvas>
+  <canvas id="fft" width="900" height="200"></canvas>
+
+  <div id="detection" style="text-align:center; font-size:1.4em; min-height:1.8em; margin:10px;"></div>
+
+  <h2 style="text-align:center;">Impulse Log</h2>
+  <div id="logContainer">
+    <table id="logTable">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Peak dB</th>
+          <th>Type</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    let audioContext, analyser, microphone, dataArray, waveformArray;
+    let isRunning = false;
+    let maxDb = -Infinity;
+    let avgDbSum = 0;
+    let avgCount = 0;
+    let lastPeakTime = 0;
+    let threshold = 75;
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const currentDbEl = document.getElementById('currentDb');
+    const avgDbEl = document.getElementById('avgDb');
+    const maxDbEl = document.getElementById('maxDb');
+    const detectionEl = document.getElementById('detection');
+    const tbody = document.querySelector('#logTable tbody');
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const thresholdValue = document.getElementById('thresholdValue');
+
+    const gaugeCanvas = document.getElementById('gauge');
+    const gaugeCtx = gaugeCanvas.getContext('2d');
+    const waveformCanvas = document.getElementById('waveform');
+    const wfCtx = waveformCanvas.getContext('2d');
+    const fftCanvas = document.getElementById('fft');
+    const fftCtx = fftCanvas.getContext('2d');
+
+    thresholdSlider.oninput = () => {
+      threshold = parseInt(thresholdSlider.value);
+      thresholdValue.textContent = threshold;
+    };
+
+    function classifyImpulse(db, freqData) {
+      // Simple classification based on dB and frequency distribution
+      let lowFreq = 0, midFreq = 0, highFreq = 0;
+      
+      // Rough frequency bands (0-2048 bins)
+      for (let i = 0; i < 20; i++) lowFreq += freqData[i];   // \~0-200Hz
+      for (let i = 20; i < 80; i++) midFreq += freqData[i];  // \~200-800Hz
+      for (let i = 80; i < 300; i++) highFreq += freqData[i]; // \~800Hz+
+
+      const total = lowFreq + midFreq + highFreq;
+
+      if (db > 105) {
+        return { type: "🔫 Gunshot", notes: "High amplitude broadband impulse" };
+      } else if (highFreq > total * 0.45) {
+        return { type: "👏 Clap / Snap", notes: "Sharp high-frequency transient" };
+      } else if (lowFreq > total * 0.4) {
+        return { type: "🗣️ Shout / Voice", notes: "Strong low-mid energy" };
+      } else {
+        return { type: "⚡ Impulse", notes: "Loud transient detected" };
+      }
+    }
+
+    function addLogEntry(db) {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-CA', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      
+      // Get current frequency data for classification
+      const freqSnapshot = new Uint8Array(dataArray);
+      analyser.getByteFrequencyData(freqSnapshot);
+      const classification = classifyImpulse(db, freqSnapshot);
+
+      const row = document.createElement('tr');
+      row.className = 'peak-row';
+      row.innerHTML = `
+        <td>${timeStr}</td>
+        <td><strong>${db.toFixed(1)}</strong></td>
+        <td>${classification.type}</td>
+        <td>${classification.notes}</td>
+      `;
+      tbody.prepend(row);
+
+      if (tbody.children.length > 50) {
+        tbody.removeChild(tbody.lastChild);
+      }
+    }
+
+    // ... (rest of the code is the same as before - startBtn, draw functions, loop, etc.)
+
+    startBtn.onclick = async () => {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.6;
+        const bufferLength = analyser.frequencyBinCount;
+        dataArray = new Uint8Array(bufferLength);
+        waveformArray = new Float32Array(analyser.fftSize);
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        microphone = audioContext.createMediaStreamSource(stream);
+        microphone.connect(analyser);
+      }
+      isRunning = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      loop();
+    };
+
+    stopBtn.onclick = () => {
+      isRunning = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    };
+
+    clearBtn.onclick = () => {
+      tbody.innerHTML = '';
+    };
+
+    function drawGauge(db) { /* same as previous */ 
+      gaugeCtx.clearRect(0, 0, 300, 160);
+      const cx = 150, cy = 135, r = 125;
+      gaugeCtx.beginPath();
+      gaugeCtx.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 2.25);
+      gaugeCtx.lineWidth = 28;
+      gaugeCtx.strokeStyle = '#222';
+      gaugeCtx.stroke();
+
+      const angle = Math.PI * 0.75 + Math.min(Math.max((db + 20) / 160, 0), 1) * (Math.PI * 1.5);
+      gaugeCtx.beginPath();
+      gaugeCtx.arc(cx, cy, r, Math.PI * 0.75, angle);
+      gaugeCtx.lineWidth = 24;
+      gaugeCtx.strokeStyle = db > 110 ? '#f00' : db > 75 ? '#ff0' : '#0f0';
+      gaugeCtx.stroke();
+
+      gaugeCtx.fillStyle = '#fff';
+      gaugeCtx.font = 'bold 32px sans-serif';
+      gaugeCtx.textAlign = 'center';
+      gaugeCtx.fillText(Math.round(db), cx, cy - 15);
+      gaugeCtx.font = '16px sans-serif';
+      gaugeCtx.fillText('dB', cx, cy + 20);
+    }
+
+    function drawWaveform() {
+      wfCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+      analyser.getFloatTimeDomainData(waveformArray);
+      wfCtx.beginPath();
+      wfCtx.strokeStyle = '#0f0';
+      wfCtx.lineWidth = 2;
+      const slice = waveformCanvas.width / waveformArray.length;
+      let x = 0;
+      for (let i = 0; i < waveformArray.length; i++) {
+        const y = (waveformArray[i] * 1.8 + 0.5) * waveformCanvas.height;
+        i === 0 ? wfCtx.moveTo(x, y) : wfCtx.lineTo(x, y);
+        x += slice;
+      }
+      wfCtx.stroke();
+    }
+
+    function drawFFT() {
+      fftCtx.clearRect(0, 0, fftCanvas.width, fftCanvas.height);
+      analyser.getByteFrequencyData(dataArray);
+      const barWidth = fftCanvas.width / dataArray.length * 2.8;
+      for (let i = 0; i < dataArray.length; i++) {
+        const height = (dataArray[i] / 255) * fftCanvas.height;
+        fftCtx.fillStyle = `hsl(${i / dataArray.length * 100 + 160}, 100%, 65%)`;
+        fftCtx.fillRect(i * barWidth, fftCanvas.height - height, barWidth - 2, height);
+      }
+    }
+
+    function calculateRMS() {
+      analyser.getFloatTimeDomainData(waveformArray);
+      let sum = 0;
+      for (let i = 0; i < waveformArray.length; i++) {
+        sum += waveformArray[i] ** 2;
+      }
+      const rms = Math.sqrt(sum / waveformArray.length);
+      return 20 * Math.log10(Math.max(rms, 0.00001)) + 94;
+    }
+
+    function loop() {
+      if (!isRunning) return;
+
+      const db = calculateRMS();
+      currentDbEl.textContent = db.toFixed(1);
+
+      avgDbSum += db;
+      avgCount++;
+      avgDbEl.textContent = (avgDbSum / avgCount).toFixed(1);
+
+      if (db > maxDb) maxDb = db, maxDbEl.textContent = maxDb.toFixed(1);
+
+      drawGauge(db);
+      drawWaveform();
+      drawFFT();
+
+      if (db > threshold && Date.now() - lastPeakTime > 600) {
+        detectionEl.innerHTML = `<span style="color:#ff4444;">🔫 IMPULSE — ${db.toFixed(1)} dB</span>`;
+        addLogEntry(db);
+        lastPeakTime = Date.now();
+        setTimeout(() => { if (isRunning) detectionEl.textContent = ''; }, 2200);
+      }
+
+      requestAnimationFrame(loop);
+    }
+  </script>
+</body>
+</html>
