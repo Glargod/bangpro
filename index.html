@@ -1,31 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Gunshot Analyzer • FFT + Smart Classification</title>
-<style>
-  body { font-family: system-ui, sans-serif; background: #111; color: #0f0; margin:0; padding:20px; }
-  h1 { text-align:center; }
-  .controls { text-align:center; margin:15px; }
-  button { padding:12px 20px; margin:0 8px; font-size:16px; background:#0f0; color:#000; border:none; border-radius:8px; cursor:pointer; }
-  button:hover { background:#0c0; }
-  button.red { background:#f44; }
-  .info { text-align:center; font-size:1.1em; margin:10px; }
-  canvas { border:1px solid #333; background:#000; display:block; margin:12px auto; max-width:100%; }
-  #gauge { width:300px; height:160px; }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>BangPro • Gunshot / Impulse Analyzer</title>
+  <meta name="description" content="Real-time FFT audio analyzer for detecting gunshots and loud impulses.">
 
-  .slider-container { text-align:center; margin:15px; }
-  input[type="range"] { width: 400px; }
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#00ff00">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
 
-  table { width:100%; max-width:900px; margin:20px auto; border-collapse:collapse; background:#1a1a1a; }
-  th, td { padding:10px; border:1px solid #333; text-align:center; }
-  th { background:#222; }
-  .peak-row { background:#330000; color:#ff6666; }
-  #logContainer { max-height:420px; overflow-y:auto; }
-</style>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #111; color: #0f0; margin:0; padding:20px; }
+    h1 { text-align:center; }
+    .controls { text-align:center; margin:15px; }
+    button { padding:12px 20px; margin:0 8px; font-size:16px; background:#0f0; color:#000; border:none; border-radius:8px; cursor:pointer; }
+    button:hover { background:#0c0; }
+    button.red { background:#f44; }
+    .info { text-align:center; font-size:1.1em; margin:10px; }
+    canvas { border:1px solid #333; background:#000; display:block; margin:12px auto; max-width:100%; }
+    #gauge { width:300px; height:160px; }
+    .slider-container { text-align:center; margin:15px; }
+    input[type="range"] { width: 400px; }
+    table { width:100%; max-width:900px; margin:20px auto; border-collapse:collapse; background:#1a1a1a; }
+    th, td { padding:10px; border:1px solid #333; text-align:center; }
+    th { background:#222; }
+    .peak-row { background:#330000; color:#ff6666; }
+    #logContainer { max-height:420px; overflow-y:auto; }
+  </style>
 </head>
 <body>
-  <h1>Gunshot Analyzer • FFT + Smart Classification</h1>
+  <h1>BangPro • Gunshot Analyzer</h1>
 
   <div class="controls">
     <button id="startBtn">Start Microphone</button>
@@ -99,61 +106,39 @@
     };
 
     function classifyImpulse(db, freqData) {
-      // Simple classification based on dB and frequency distribution
-      let lowFreq = 0, midFreq = 0, highFreq = 0;
-      
-      // Rough frequency bands (0-2048 bins)
-      for (let i = 0; i < 20; i++) lowFreq += freqData[i];   // \~0-200Hz
-      for (let i = 20; i < 80; i++) midFreq += freqData[i];  // \~200-800Hz
-      for (let i = 80; i < 300; i++) highFreq += freqData[i]; // \~800Hz+
+      let low = 0, mid = 0, high = 0;
+      for (let i = 0; i < 20; i++) low += freqData[i];
+      for (let i = 20; i < 80; i++) mid += freqData[i];
+      for (let i = 80; i < 300; i++) high += freqData[i];
+      const total = low + mid + high;
 
-      const total = lowFreq + midFreq + highFreq;
-
-      if (db > 105) {
-        return { type: "🔫 Gunshot", notes: "High amplitude broadband impulse" };
-      } else if (highFreq > total * 0.45) {
-        return { type: "👏 Clap / Snap", notes: "Sharp high-frequency transient" };
-      } else if (lowFreq > total * 0.4) {
-        return { type: "🗣️ Shout / Voice", notes: "Strong low-mid energy" };
-      } else {
-        return { type: "⚡ Impulse", notes: "Loud transient detected" };
-      }
+      if (db > 105) return { type: "🔫 Gunshot", notes: "High amplitude broadband" };
+      if (high > total * 0.45) return { type: "👏 Clap / Snap", notes: "High-frequency transient" };
+      if (low > total * 0.4) return { type: "🗣️ Shout / Voice", notes: "Low-mid energy" };
+      return { type: "⚡ Impulse", notes: "Loud transient" };
     }
 
     function addLogEntry(db) {
       const now = new Date();
       const timeStr = now.toLocaleTimeString('en-CA', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      
-      // Get current frequency data for classification
       const freqSnapshot = new Uint8Array(dataArray);
       analyser.getByteFrequencyData(freqSnapshot);
-      const classification = classifyImpulse(db, freqSnapshot);
+      const cls = classifyImpulse(db, freqSnapshot);
 
       const row = document.createElement('tr');
       row.className = 'peak-row';
-      row.innerHTML = `
-        <td>${timeStr}</td>
-        <td><strong>${db.toFixed(1)}</strong></td>
-        <td>${classification.type}</td>
-        <td>${classification.notes}</td>
-      `;
+      row.innerHTML = `<td>\( {timeStr}</td><td><strong> \){db.toFixed(1)}</strong></td><td>\( {cls.type}</td><td> \){cls.notes}</td>`;
       tbody.prepend(row);
-
-      if (tbody.children.length > 50) {
-        tbody.removeChild(tbody.lastChild);
-      }
+      if (tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
     }
-
-    // ... (rest of the code is the same as before - startBtn, draw functions, loop, etc.)
 
     startBtn.onclick = async () => {
       if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 2048;
-        analyser.smoothingTimeConstant = 0.6;
-        const bufferLength = analyser.frequencyBinCount;
-        dataArray = new Uint8Array(bufferLength);
+        analyser.smoothingTimeConstant = 0.65;
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
         waveformArray = new Float32Array(analyser.fftSize);
 
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -166,17 +151,10 @@
       loop();
     };
 
-    stopBtn.onclick = () => {
-      isRunning = false;
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-    };
+    stopBtn.onclick = () => { isRunning = false; startBtn.disabled = false; stopBtn.disabled = true; };
+    clearBtn.onclick = () => { tbody.innerHTML = ''; };
 
-    clearBtn.onclick = () => {
-      tbody.innerHTML = '';
-    };
-
-    function drawGauge(db) { /* same as previous */ 
+    function drawGauge(db) {
       gaugeCtx.clearRect(0, 0, 300, 160);
       const cx = 150, cy = 135, r = 125;
       gaugeCtx.beginPath();
@@ -230,24 +208,17 @@
     function calculateRMS() {
       analyser.getFloatTimeDomainData(waveformArray);
       let sum = 0;
-      for (let i = 0; i < waveformArray.length; i++) {
-        sum += waveformArray[i] ** 2;
-      }
+      for (let i = 0; i < waveformArray.length; i++) sum += waveformArray[i] ** 2;
       const rms = Math.sqrt(sum / waveformArray.length);
       return 20 * Math.log10(Math.max(rms, 0.00001)) + 94;
     }
 
     function loop() {
       if (!isRunning) return;
-
       const db = calculateRMS();
       currentDbEl.textContent = db.toFixed(1);
-
-      avgDbSum += db;
-      avgCount++;
-      avgDbEl.textContent = (avgDbSum / avgCount).toFixed(1);
-
-      if (db > maxDb) maxDb = db, maxDbEl.textContent = maxDb.toFixed(1);
+      avgDbSum += db; avgCount++; avgDbEl.textContent = (avgDbSum / avgCount).toFixed(1);
+      if (db > maxDb) { maxDb = db; maxDbEl.textContent = maxDb.toFixed(1); }
 
       drawGauge(db);
       drawWaveform();
@@ -259,8 +230,14 @@
         lastPeakTime = Date.now();
         setTimeout(() => { if (isRunning) detectionEl.textContent = ''; }, 2200);
       }
-
       requestAnimationFrame(loop);
+    }
+
+    // PWA Service Worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js');
+      });
     }
   </script>
 </body>
