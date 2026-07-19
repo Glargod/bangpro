@@ -133,12 +133,10 @@
 
       const row = document.createElement('tr');
       row.className = 'peak-row';
-      row.innerHTML = `
-        <td>${timeStr}</td>
-        <td><strong>${db.toFixed(1)}</strong></td>
-        <td>${cls.type}</td>
-        <td>${cls.notes}</td>
-      `;
+      row.innerHTML = '<td>' + timeStr + '</td>' +
+                '<td><strong>' + db.toFixed(1) + '</strong></td>' +
+                '<td>' + cls.type + '</td>' +
+                '<td>' + cls.notes + '</td>';
       tbody.prepend(row);
       if (tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
     }
