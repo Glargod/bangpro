@@ -121,13 +121,19 @@
     function addLogEntry(db) {
       const now = new Date();
       const timeStr = now.toLocaleTimeString('en-CA', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      
       const freqSnapshot = new Uint8Array(dataArray);
       analyser.getByteFrequencyData(freqSnapshot);
       const cls = classifyImpulse(db, freqSnapshot);
 
       const row = document.createElement('tr');
       row.className = 'peak-row';
-      row.innerHTML = `<td>\( {timeStr}</td><td><strong> \){db.toFixed(1)}</strong></td><td>\( {cls.type}</td><td> \){cls.notes}</td>`;
+      row.innerHTML = `
+        <td>${timeStr}</td>
+        <td><strong>${db.toFixed(1)}</strong></td>
+        <td>${cls.type}</td>
+        <td>${cls.notes}</td>
+      `;
       tbody.prepend(row);
       if (tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
     }
@@ -151,7 +157,12 @@
       loop();
     };
 
-    stopBtn.onclick = () => { isRunning = false; startBtn.disabled = false; stopBtn.disabled = true; };
+    stopBtn.onclick = () => {
+      isRunning = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    };
+
     clearBtn.onclick = () => { tbody.innerHTML = ''; };
 
     function drawGauge(db) {
@@ -215,10 +226,16 @@
 
     function loop() {
       if (!isRunning) return;
+
       const db = calculateRMS();
       currentDbEl.textContent = db.toFixed(1);
-      avgDbSum += db; avgCount++; avgDbEl.textContent = (avgDbSum / avgCount).toFixed(1);
-      if (db > maxDb) { maxDb = db; maxDbEl.textContent = maxDb.toFixed(1); }
+      avgDbSum += db;
+      avgCount++;
+      avgDbEl.textContent = (avgDbSum / avgCount).toFixed(1);
+      if (db > maxDb) {
+        maxDb = db;
+        maxDbEl.textContent = maxDb.toFixed(1);
+      }
 
       drawGauge(db);
       drawWaveform();
@@ -230,14 +247,8 @@
         lastPeakTime = Date.now();
         setTimeout(() => { if (isRunning) detectionEl.textContent = ''; }, 2200);
       }
-      requestAnimationFrame(loop);
-    }
 
-    // PWA Service Worker
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js');
-      });
+      requestAnimationFrame(loop);
     }
   </script>
 </body>
