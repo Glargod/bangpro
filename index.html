@@ -73,7 +73,7 @@
     </table>
   </div>
 
-  <script>
+<script>
     let audioContext, analyser, microphone, dataArray, waveformArray;
     let isRunning = false;
     let maxDb = -Infinity;
@@ -106,11 +106,13 @@
     };
 
     function classifyImpulse(db, freqData) {
+      if (!freqData || freqData.length === 0) return { type: "⚡ Impulse", notes: "Loud transient" };
+      
       let low = 0, mid = 0, high = 0;
-      for (let i = 0; i < 20; i++) low += freqData[i];
-      for (let i = 20; i < 80; i++) mid += freqData[i];
-      for (let i = 80; i < 300; i++) high += freqData[i];
-      const total = low + mid + high;
+      for (let i = 0; i < Math.min(20, freqData.length); i++) low += freqData[i];
+      for (let i = 20; i < Math.min(80, freqData.length); i++) mid += freqData[i];
+      for (let i = 80; i < Math.min(300, freqData.length); i++) high += freqData[i];
+      const total = low + mid + high || 1;
 
       if (db > 105) return { type: "🔫 Gunshot", notes: "High amplitude broadband" };
       if (high > total * 0.45) return { type: "👏 Clap / Snap", notes: "High-frequency transient" };
@@ -122,9 +124,12 @@
       const now = new Date();
       const timeStr = now.toLocaleTimeString('en-CA', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
       
-      const freqSnapshot = new Uint8Array(dataArray);
-      analyser.getByteFrequencyData(freqSnapshot);
-      const cls = classifyImpulse(db, freqSnapshot);
+      let cls = { type: "⚡ Impulse", notes: "Loud transient" };
+      if (analyser && dataArray) {
+        const freqSnapshot = new Uint8Array(dataArray);
+        analyser.getByteFrequencyData(freqSnapshot);
+        cls = classifyImpulse(db, freqSnapshot);
+      }
 
       const row = document.createElement('tr');
       row.className = 'peak-row';
@@ -138,6 +143,7 @@
       if (tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
     }
 
+    // Rest of the script remains the same...
     startBtn.onclick = async () => {
       if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -250,6 +256,6 @@
 
       requestAnimationFrame(loop);
     }
-  </script>
+      </script>
 </body>
 </html>
